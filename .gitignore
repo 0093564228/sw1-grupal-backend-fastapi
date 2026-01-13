@@ -1,0 +1,46 @@
+# Entornos virtuales
+venv/
+venv_torch/
+env/
+ENV/
+
+# Archivos de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Configuración local (no incluir .env en este proyecto)
+# .env
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Archivos de video/audio resultantes (archivos grandes generados)
+*.mp4
+*.wav
+media/
+output_*/
+
+# Modelos preentrenados (archivos grandes)
+pretrained_models/
+
+# Frontend (este es un proyecto de backend)
+frontend/
+
+# Temporales
+*.tmp
+*.temp
+.cache/
