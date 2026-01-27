@@ -329,7 +329,8 @@ def componer_video_karaoke(rutas: Dict[str, Path]) -> Path:
             60,
             "Comprobando y redimensionando video a 1920x1080 si aplica",
         )
-        ruta_video_actual = ensure_video_resized(ruta_video_instrumental, rutas)
+        #ruta_video_actual = ensure_video_resized(ruta_video_instrumental, rutas)
+        ruta_video_actual = ruta_video_instrumental # No redimensionar video
         if ruta_video_actual != ruta_video_instrumental:
             print(f"Video redimensionado -> {ruta_video_actual}")
         else:
