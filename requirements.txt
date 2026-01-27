@@ -42,6 +42,7 @@ pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pydantic==2.11.9
 pydantic_core==2.33.2
+python-certifi-win32==1.6.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 python-multipart==0.0.20
