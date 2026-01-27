@@ -3,6 +3,32 @@ import os
 import sys
 from pathlib import Path
 
+import torch.serialization
+from torch.torch_version import TorchVersion
+from omegaconf.base import Metadata
+from omegaconf.listconfig import ListConfig, ContainerMetadata
+from omegaconf.nodes import AnyNode
+from typing import Any
+from collections import defaultdict
+from pyannote.audio.core.model import Introspection
+from pyannote.audio.core.task import Specifications, Problem, Resolution
+
+torch.serialization.add_safe_globals([
+    ListConfig,
+    ContainerMetadata,
+    Any,
+    list,
+    defaultdict,
+    dict,
+    int,
+    AnyNode,
+    Metadata,
+    TorchVersion,
+    Introspection,
+    Specifications,
+    Problem,
+    Resolution,
+])
 
 def env(name: str, default: str | None = None) -> str | None:
     value = os.getenv(name)
