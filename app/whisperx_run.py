@@ -54,31 +54,42 @@ def main() -> None:
         required=True,
         help="Ruta del archivo de audio a transcribir (DEBE SER ESPAÑOL)",
     )
-    parser.add_argument("--srt", required=True, help="Ruta de salida del archivo SRT")
     parser.add_argument(
-        "--model",
-        default=None,
-        help="tiny|base|small|medium|large-v2 (default: medium para balance)",
+        "--language",
+        default="auto",
+        choices=["auto", "es", "en", "pt"],
+        help="Idioma del audio: auto, es, en, pt",
+    )
+    parser.add_argument(
+        "--srt",
+        required=True,
+        help="Ruta de salida para el archivo SRT",
     )
     parser.add_argument(
         "--device",
         default=None,
-        choices=["cpu", "cuda"],
-        help="CPU o CUDA (default: auto-detect)",
+        help="Dispositivo a usar (cuda, cpu)",
     )
     parser.add_argument(
-        "--batch-size",
+        "--model",
+        default=None,
+        help="Modelo Whisper a usar (tiny, base, small, medium, large-v2)",
+    )
+    parser.add_argument(
+        "--batch_size",
         type=int,
         default=None,
-        help="Tamaño de batch (default: auto por device)",
+        help="Tamaño del batch para transcripción",
     )
     args = parser.parse_args()
 
     audio_path = args.audio
     srt_path = args.srt
 
-    # FIJO: Idioma SIEMPRE es español
-    LANGUAGE = "es"
+    # Lógica de idioma
+    LANGUAGE = args.language
+    if LANGUAGE == "auto":
+        LANGUAGE = None  # WhisperX usa None para autodetección
 
     # Validaciones iniciales
     if not os.path.exists(audio_path):
@@ -144,8 +155,11 @@ def main() -> None:
         )
         print(f"[WhisperX] Batch size: {batch_size}", file=sys.stderr)
 
-        # 5) Idioma: SIEMPRE ESPAÑOL (no autodetectar)
-        print(f"[WhisperX] Idioma fijado: {LANGUAGE} (ESPAÑOL)", file=sys.stderr)
+        # 5) Idioma
+        print(
+            f"[WhisperX] Idioma seleccionado: {LANGUAGE if LANGUAGE else 'AUTO (detectar)'}",
+            file=sys.stderr,
+        )
 
         # 6) Limitar threads BLAS (opcional)
         omp = as_int("OMP_NUM_THREADS", 0)
@@ -156,7 +170,8 @@ def main() -> None:
             os.environ["MKL_NUM_THREADS"] = str(mkl)
 
         print(
-            f"[WhisperX] Cargando modelo {model_name} para ESPAÑOL...", file=sys.stderr
+            f"[WhisperX] Cargando modelo {model_name}...",
+            file=sys.stderr,
         )
         model = whisperx.load_model(
             model_name, device, compute_type=compute_type, language=LANGUAGE
@@ -177,12 +192,15 @@ def main() -> None:
         result = model.transcribe(audio, batch_size=batch_size)
         print(f"[WhisperX] Transcripción completada", file=sys.stderr)
 
-        detected_language = result.get("language", "desconocido")
-        print(f"[WhisperX] Idioma detectado: {detected_language}", file=sys.stderr)
+        # Obtener el idioma para alineación
+        # Si LANGUAGE es None (auto), usar el idioma detectado por Whisper
+        align_language = LANGUAGE if LANGUAGE else result.get("language")
 
-        print(f"[WhisperX] Alineando timestamps para español...", file=sys.stderr)
+        print(f"[WhisperX] Idioma detectado/usado: {align_language}", file=sys.stderr)
+
+        print(f"[WhisperX] Alineando timestamps...", file=sys.stderr)
         align_model, metadata = whisperx.load_align_model(
-            language_code=LANGUAGE,
+            language_code=align_language,
             device=device,
         )
         aligned = whisperx.align(

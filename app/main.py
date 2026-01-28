@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, status
 from typing import List
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,6 +132,7 @@ def get_me(current_user: User = Depends(get_current_user)):
 @app.post("/procesar-video/")
 async def procesar_video(
     file: UploadFile = File(...),
+    language: str = Form("auto"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -303,6 +304,7 @@ async def procesar_video(
                 print(f"Script: {script_path}")
                 print(f"Audio: {audio_in}")
                 print(f"SRT output: {srt_path}")
+                print(f"Idioma: {language}")
 
                 resultado_whisperx = subprocess.run(
                     [
@@ -312,6 +314,8 @@ async def procesar_video(
                         audio_in,
                         "--srt",
                         srt_path,
+                        "--language",
+                        language,
                     ],
                     check=False,  # No lanzar excepción, capturar el código
                     cwd=project_root,
