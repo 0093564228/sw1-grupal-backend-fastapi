@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from .database import Base
 
 
+
 class Media(Base):
     __tablename__ = "media"
 
@@ -13,6 +14,10 @@ class Media(Base):
     format = Column(String, nullable=False)
     type = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    job_id = Column(String, nullable=True)
+    album_id = Column(Integer, ForeignKey("albums.id"), nullable=True)
+
+    album = relationship("Album", back_populates="media")
 
 
 class User(Base):
@@ -23,11 +28,11 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    projects = relationship("Project", back_populates="user", cascade="all, delete")
+    albums = relationship("Album", back_populates="user", cascade="all, delete")
 
 
-class Project(Base):
-    __tablename__ = "proyecto"
+class Album(Base):
+    __tablename__ = "albums"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
@@ -35,4 +40,6 @@ class Project(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    user = relationship("User", back_populates="projects")
+    user = relationship("User", back_populates="albums")
+    media = relationship("Media", back_populates="album", cascade="all, delete")
+
