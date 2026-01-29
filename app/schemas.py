@@ -35,24 +35,42 @@ class TokenRefresh(BaseModel):
     refresh_token: str
 
 
-class ProjectBase(BaseModel):
+class MediaBase(BaseModel):
+    name: str
+    path: str
+    format: str
+    type: str
+    job_id: Optional[str] = None
+    album_id: Optional[int] = None
+
+
+class MediaResponse(MediaBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AlbumBase(BaseModel):
     name: str
     description: Optional[str] = None
 
 
-class ProjectCreate(ProjectBase):
+class AlbumCreate(AlbumBase):
     user_id: int
 
 
-class ProjectUpdate(BaseModel):
+class AlbumUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
 
-class ProjectResponse(ProjectBase):
+class AlbumResponse(AlbumBase):
     id: int
     user_id: int
     created_at: datetime
+    media: List[MediaResponse] = []
 
     class Config:
         from_attributes = True

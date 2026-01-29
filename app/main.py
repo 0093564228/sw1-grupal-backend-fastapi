@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, status
+
 from typing import List
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,16 +13,16 @@ import tempfile
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, engine
-from app.models import Base, Media, User, Project
+from app.models import Base, Media, User, Album
 from app.schemas import (
     UserCreate,
     UserResponse,
     LoginRequest,
     Token,
     TokenRefresh,
-    ProjectCreate,
-    ProjectResponse,
-    ProjectBase,
+    AlbumCreate,
+    AlbumResponse,
+    AlbumBase,
 )
 from app.auth import (
     get_password_hash,
@@ -131,11 +132,18 @@ def get_me(current_user: User = Depends(get_current_user)):
 
 @app.post("/procesar-video/")
 async def procesar_video(
+    album_id: int = Form(...),
     file: UploadFile = File(...),
     language: str = Form("auto"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+): 
+    # Validar que el album existe y pertenece al usuario
+    album = db.query(Album).filter(Album.id == album_id).first()
+    if not album:
+        raise HTTPException(status_code=404, detail="Álbum no encontrado")
+    if album.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="No autorizado para este álbum")
 
     # Capturar nombre original del archivo para el nombre de salida
     original_filename = file.filename or "video"
@@ -186,6 +194,8 @@ async def procesar_video(
                 path=audio_file,
                 format="wav",
                 type="audio",
+                album_id=album_id,
+                job_id=session_uuid,
             )
         )
 
@@ -195,6 +205,8 @@ async def procesar_video(
                 path=video_sin_audio_file,
                 format="mp4",
                 type="video",
+                album_id=album_id,
+                job_id=session_uuid,
             )
         )
 
@@ -363,6 +375,8 @@ async def procesar_video(
                             path=srt_path,
                             format="srt",
                             type="subtitle",
+                            album_id=album_id,
+                            job_id=base_id,
                         )
                     )
                     print(f"Conversión SRT->ASS completada: {ass_path}")
@@ -378,6 +392,8 @@ async def procesar_video(
                         path=ass_path,
                         format="ass",
                         type="subtitle",
+                        album_id=album_id,
+                        job_id=base_id,
                     )
                 )
                 db.commit()
@@ -395,6 +411,8 @@ async def procesar_video(
                                 path=video_karaoke_path,
                                 format="mp4",
                                 type="video_karaoke",
+                                album_id=album_id,
+                                job_id=session_uuid,
                             )
                         )
                         db.commit()
@@ -615,8 +633,8 @@ async def descargar_archivo(tipo: str, job_id: str):
         )
 
 
-@app.get("/projects", response_model=List[ProjectResponse])
-def get_projects(
+@app.get("/albums", response_model=List[AlbumResponse])
+def get_albums(
     userId: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -625,13 +643,13 @@ def get_projects(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
         )
-    projects = db.query(Project).filter(Project.user_id == userId).all()
-    return projects
+    albums = db.query(Album).filter(Album.user_id == userId).all()
+    return albums
 
 
-@app.post("/projects", response_model=ProjectResponse)
-def create_project(
-    payload: ProjectCreate,
+@app.post("/albums", response_model=AlbumResponse)
+def create_album(
+    payload: AlbumCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -639,55 +657,55 @@ def create_project(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
         )
-    project = Project(
+    album = Album(
         name=payload.name, description=payload.description, user_id=payload.user_id
     )
-    db.add(project)
+    db.add(album)
     db.commit()
-    db.refresh(project)
-    return project
+    db.refresh(album)
+    return album
 
 
-@app.put("/projects/{id}", response_model=ProjectResponse)
-def update_project(
+@app.put("/albums/{id}", response_model=AlbumResponse)
+def update_album(
     id: int,
-    payload: ProjectBase,
+    payload: AlbumBase,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == id).first()
-    if not project:
+    album = db.query(Album).filter(Album.id == id).first()
+    if not album:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Proyecto no encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Álbum no encontrado"
         )
-    if project.user_id != current_user.id:
+    if album.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
         )
     if payload.name is not None:
-        project.name = payload.name
+        album.name = payload.name
     if payload.description is not None:
-        project.description = payload.description
+        album.description = payload.description
     db.commit()
-    db.refresh(project)
-    return project
+    db.refresh(album)
+    return album
 
 
-@app.delete("/projects/{id}", status_code=204)
-def delete_project(
+@app.delete("/albums/{id}", status_code=204)
+def delete_album(
     id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == id).first()
-    if not project:
+    album = db.query(Album).filter(Album.id == id).first()
+    if not album:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Proyecto no encontrado"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Álbum no encontrado"
         )
-    if project.user_id != current_user.id:
+    if album.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
         )
-    db.delete(project)
+    db.delete(album)
     db.commit()
     return
