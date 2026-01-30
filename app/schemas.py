@@ -40,13 +40,30 @@ class MediaBase(BaseModel):
     path: str
     format: str
     type: str
-    job_id: Optional[str] = None
-    album_id: Optional[int] = None
+    video_id: Optional[int] = None
 
 
 class MediaResponse(MediaBase):
     id: int
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class VideoBase(BaseModel):
+    name: str
+    job_id: Optional[str] = None
+    duration: Optional[int] = None
+    type: str
+    album_id: int
+
+
+class VideoResponse(VideoBase):
+    id: int
+    created_at: datetime
+    thumbnail_id: Optional[int] = None
+    media: List[MediaResponse] = []
 
     class Config:
         from_attributes = True
@@ -70,7 +87,7 @@ class AlbumResponse(AlbumBase):
     id: int
     user_id: int
     created_at: datetime
-    media: List[MediaResponse] = []
+    videos: List[VideoResponse] = []
 
     class Config:
         from_attributes = True

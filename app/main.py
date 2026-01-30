@@ -13,7 +13,7 @@ import tempfile
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, engine
-from app.models import Base, Media, User, Album
+from app.models import Base, Media, User, Album, Video
 from app.schemas import (
     UserCreate,
     UserResponse,
@@ -23,6 +23,7 @@ from app.schemas import (
     AlbumCreate,
     AlbumResponse,
     AlbumBase,
+    VideoResponse,
 )
 from app.auth import (
     get_password_hash,
@@ -188,14 +189,87 @@ async def procesar_video(
             check=True,
         )
 
+        # Obtener duración del video usando ffprobe
+        duration = 0
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    input_temp,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            duration = int(float(probe.stdout.strip()))
+        except Exception as e:
+            print(f"Error obteniendo duración: {e}")
+
+        # Crear entidad Video
+        video_entity = Video(
+            name=base_name,
+            job_id=session_uuid,
+            duration=duration,
+            type="mp4",
+            album_id=album_id,
+        )
+        db.add(video_entity)
+        db.commit()
+        db.refresh(video_entity)
+
+        # Generar Thumbnail
+        thumbnail_dir = "media/thumbnails"
+        os.makedirs(thumbnail_dir, exist_ok=True)
+        thumbnail_path = f"{thumbnail_dir}/{session_uuid}.jpg"
+
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i",
+                    input_temp,
+                    "-ss",
+                    "00:00:05.000",
+                    "-vframes",
+                    "1",
+                    thumbnail_path,
+                    "-y",
+                ],
+                check=True,
+            )
+
+            # Crear entidad Media para el thumbnail
+            thumbnail_media = Media(
+                name=f"{session_uuid}.jpg",
+                path=thumbnail_path,
+                format="jpg",
+                type="thumbnail",
+                video_id=video_entity.id,
+            )
+            db.add(thumbnail_media)
+            db.commit()
+            db.refresh(thumbnail_media)
+
+            # Actualizar Video con el thumbnail_id
+            video_entity.thumbnail_id = thumbnail_media.id
+            db.commit()
+
+        except Exception as e:
+            print(f"Error generando thumbnail: {e}")
+
         db.add(
             Media(
                 name=os.path.basename(audio_file),
                 path=audio_file,
                 format="wav",
                 type="audio",
-                album_id=album_id,
-                job_id=session_uuid,
+                video_id=video_entity.id,
             )
         )
 
@@ -205,8 +279,7 @@ async def procesar_video(
                 path=video_sin_audio_file,
                 format="mp4",
                 type="video",
-                album_id=album_id,
-                job_id=session_uuid,
+                video_id=video_entity.id,
             )
         )
 
@@ -375,8 +448,7 @@ async def procesar_video(
                             path=srt_path,
                             format="srt",
                             type="subtitle",
-                            album_id=album_id,
-                            job_id=base_id,
+                            video_id=video_entity.id,
                         )
                     )
                     print(f"Conversión SRT->ASS completada: {ass_path}")
@@ -392,8 +464,7 @@ async def procesar_video(
                         path=ass_path,
                         format="ass",
                         type="subtitle",
-                        album_id=album_id,
-                        job_id=base_id,
+                        video_id=video_entity.id,
                     )
                 )
                 db.commit()
@@ -411,8 +482,7 @@ async def procesar_video(
                                 path=video_karaoke_path,
                                 format="mp4",
                                 type="video_karaoke",
-                                album_id=album_id,
-                                job_id=session_uuid,
+                                video_id=video_entity.id,
                             )
                         )
                         db.commit()
