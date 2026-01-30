@@ -572,6 +572,11 @@ async def descargar_archivo(tipo: str, job_id: str):
             media_type = "audio/wav"
             filename = f"{job_id}_instrumental.wav"
             disposition = "attachment"
+        elif tipo == "thumbnail":
+            file_path = job.imagen_thumbnail_file
+            media_type = "image/jpeg"
+            filename = f"{job_id}_thumbnail.jpg"
+            disposition = "inline"
         else:
             return JSONResponse({"error": "Tipo de archivo no válido"}, status_code=400)
 
@@ -595,6 +600,26 @@ async def descargar_archivo(tipo: str, job_id: str):
         return JSONResponse(
             {"error": f"Error descargando archivo: {str(e)}"}, status_code=500
         )
+
+
+@app.get("/albums/{id}/videos")
+def get_album_videos(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    album = db.query(Album).filter(Album.id == id).first()
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Álbum no encontrado"
+        )
+    if album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+    
+    return album.videos
+
 
 
 @app.get("/albums", response_model=List[AlbumResponse])
