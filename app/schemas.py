@@ -35,35 +35,16 @@ class TokenRefresh(BaseModel):
     refresh_token: str
 
 
-class MediaBase(BaseModel):
-    name: str
-    path: str
-    format: str
-    type: str
-    video_id: Optional[int] = None
-
-
-class MediaResponse(MediaBase):
-    id: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
 class VideoBase(BaseModel):
     name: str
     job_id: Optional[str] = None
-    duration: Optional[int] = None
-    type: str
-    album_id: int
+    duration_in_seconds: Optional[int] = None
+    format: str
 
 
 class VideoResponse(VideoBase):
     id: int
     created_at: datetime
-    thumbnail_id: Optional[int] = None
-    media: List[MediaResponse] = []
 
     class Config:
         from_attributes = True
