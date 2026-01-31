@@ -21,6 +21,7 @@ from app.schemas import (
     AlbumCreate,
     AlbumResponse,
     AlbumBase,
+    VideoResponse,
 )
 from app.auth import (
     get_password_hash,
@@ -621,6 +622,64 @@ def get_album_videos(
     return album.videos
 
 
+@app.get("/videos/{id}", response_model=VideoResponse)
+def get_video(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.id == id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+    # Verificar que el álbum del video pertenezca al usuario del video (acceso indirecto)
+    # OJO: La tabla Video no tiene user_id directo, se accede via álbum.
+    album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not album or album.user_id != current_user.id:
+        raise HTTPException(
+             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+    return video
+
+
+@app.put("/videos/{id}/album", response_model=VideoResponse)
+def move_video_album(
+    id: int,
+    target_album_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.id == id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+
+    # Verificar propiedad del video actual
+    current_album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not current_album or current_album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video"
+        )
+
+    # Verificar existencia y propiedad del álbum destino
+    target_album = db.query(Album).filter(Album.id == target_album_id).first()
+    if not target_album:
+        raise HTTPException(
+             status_code=status.HTTP_404_NOT_FOUND, detail="Álbum destino no encontrado"
+        )
+    if target_album.user_id != current_user.id:
+        raise HTTPException(
+             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para el álbum destino"
+        )
+
+    video.album_id = target_album_id
+    db.commit()
+    db.refresh(video)
+    return video
+
+
 
 @app.get("/albums", response_model=List[AlbumResponse])
 def get_albums(
@@ -654,6 +713,22 @@ def create_album(
     db.refresh(album)
     return album
 
+@app.get("/albums/{id}", response_model=AlbumResponse)
+def read_album(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    album = db.query(Album).filter(Album.id == id).first()
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Álbum no encontrado"
+        )
+    if album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+    return album
 
 @app.put("/albums/{id}", response_model=AlbumResponse)
 def update_album(
