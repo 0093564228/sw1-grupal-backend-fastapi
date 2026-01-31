@@ -8,6 +8,7 @@ import os
 import json
 import zipfile
 import tempfile
+import shutil
 from sqlalchemy.orm import Session
 
 from app.database import engine
@@ -22,6 +23,7 @@ from app.schemas import (
     AlbumResponse,
     AlbumBase,
     VideoResponse,
+    VideoUpdate,
 )
 from app.auth import (
     get_password_hash,
@@ -678,6 +680,72 @@ def move_video_album(
     db.commit()
     db.refresh(video)
     return video
+
+
+@app.put("/videos/{id}", response_model=VideoResponse)
+def update_video(
+    id: int,
+    payload: VideoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.id == id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+    
+    # Verificar propiedad (via álbum)
+    album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not album or album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+
+    if payload.name is not None:
+        video.name = payload.name
+
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@app.delete("/videos/{id}", status_code=204)
+def delete_video(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.id == id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+
+    # Verificar propiedad (via álbum)
+    album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not album or album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+
+    # 1. Eliminar directorio físico (media/{job_id})
+    if video.job_id:
+        try:
+            job_instance = Job(video.job_id)
+            if os.path.exists(job_instance.job_dir):
+                shutil.rmtree(job_instance.job_dir)
+                print(f"Directorio eliminado: {job_instance.job_dir}")
+            else:
+                print(f"Directorio no encontrado: {job_instance.job_dir}")
+        except Exception as e:
+            print(f"Error eliminando directorio físico: {e}")
+            # No bloqueamos la eliminación de la DB, pero logueamos error
+
+    # 2. Eliminar de la base de datos
+    db.delete(video)
+    db.commit()
+    return
 
 
 

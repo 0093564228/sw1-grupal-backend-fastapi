@@ -42,6 +42,10 @@ class VideoBase(BaseModel):
     format: str
 
 
+class VideoUpdate(BaseModel):
+    name: Optional[str] = None
+
+
 class VideoResponse(VideoBase):
     id: int
     created_at: datetime
