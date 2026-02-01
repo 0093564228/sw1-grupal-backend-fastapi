@@ -11,8 +11,8 @@ class Video(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    job_id = Column(String, nullable=True)
-    duration_in_seconds = Column(Integer, nullable=True)
+    job_id = Column(String, nullable=False)
+    duration_in_seconds = Column(Integer, nullable=False)
     format = Column(String, nullable=False)
     album_id = Column(Integer, ForeignKey("albums.id"), nullable=False)
 
@@ -35,7 +35,7 @@ class Album(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
+    description = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

@@ -37,10 +37,10 @@ class TokenRefresh(BaseModel):
 
 class VideoBase(BaseModel):
     name: str
-    job_id: Optional[str] = None
-    duration_in_seconds: Optional[int] = None
+    job_id: str
+    duration_in_seconds: int
     format: str
-
+    album_id: int
 
 class VideoUpdate(BaseModel):
     name: Optional[str] = None
@@ -56,7 +56,7 @@ class VideoResponse(VideoBase):
 
 class AlbumBase(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str
 
 
 class AlbumCreate(AlbumBase):

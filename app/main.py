@@ -624,13 +624,13 @@ def get_album_videos(
     return album.videos
 
 
-@app.get("/videos/{id}", response_model=VideoResponse)
+@app.get("/videos/{job_id}", response_model=VideoResponse)
 def get_video(
-    id: int,
+    job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    video = db.query(Video).filter(Video.id == id).first()
+    video = db.query(Video).filter(Video.job_id == job_id).first()
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
@@ -645,14 +645,14 @@ def get_video(
     return video
 
 
-@app.put("/videos/{id}/album", response_model=VideoResponse)
+@app.put("/videos/{job_id}/album", response_model=VideoResponse)
 def move_video_album(
-    id: int,
+    job_id: str,
     target_album_id: int = Form(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    video = db.query(Video).filter(Video.id == id).first()
+    video = db.query(Video).filter(Video.job_id == job_id).first()
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
@@ -682,14 +682,14 @@ def move_video_album(
     return video
 
 
-@app.put("/videos/{id}", response_model=VideoResponse)
+@app.put("/videos/{job_id}", response_model=VideoResponse)
 def update_video(
-    id: int,
+    job_id: str,
     payload: VideoUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    video = db.query(Video).filter(Video.id == id).first()
+    video = db.query(Video).filter(Video.job_id == job_id).first()
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
@@ -710,13 +710,13 @@ def update_video(
     return video
 
 
-@app.delete("/videos/{id}", status_code=204)
+@app.delete("/videos/{job_id}", status_code=204)
 def delete_video(
-    id: int,
+    job_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    video = db.query(Video).filter(Video.id == id).first()
+    video = db.query(Video).filter(Video.job_id == job_id).first()
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
