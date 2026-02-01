@@ -35,16 +35,18 @@ class TokenRefresh(BaseModel):
     refresh_token: str
 
 
-class MediaBase(BaseModel):
+class VideoBase(BaseModel):
     name: str
-    path: str
+    job_id: str
+    duration_in_seconds: int
     format: str
-    type: str
-    job_id: Optional[str] = None
-    album_id: Optional[int] = None
+    album_id: int
+
+class VideoUpdate(BaseModel):
+    name: Optional[str] = None
 
 
-class MediaResponse(MediaBase):
+class VideoResponse(VideoBase):
     id: int
     created_at: datetime
 
@@ -54,7 +56,7 @@ class MediaResponse(MediaBase):
 
 class AlbumBase(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str
 
 
 class AlbumCreate(AlbumBase):
@@ -70,7 +72,7 @@ class AlbumResponse(AlbumBase):
     id: int
     user_id: int
     created_at: datetime
-    media: List[MediaResponse] = []
+    videos: List[VideoResponse] = []
 
     class Config:
         from_attributes = True

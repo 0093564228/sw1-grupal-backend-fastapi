@@ -1,19 +1,18 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, status, BackgroundTasks
 
 from typing import List
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import subprocess
 import os
-import uuid
-import shutil
 import json
 import zipfile
 import tempfile
+import shutil
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, engine
-from app.models import Base, Media, User, Album
+from app.database import engine
+from app.models import Base, User, Album, Video
 from app.schemas import (
     UserCreate,
     UserResponse,
@@ -23,6 +22,8 @@ from app.schemas import (
     AlbumCreate,
     AlbumResponse,
     AlbumBase,
+    VideoResponse,
+    VideoUpdate,
 )
 from app.auth import (
     get_password_hash,
@@ -35,6 +36,8 @@ from app.auth import (
 )
 from app.subtitles import convertir_srt_a_ass, segundos_a_tiempo_srt
 from app.karaoke import karaoke_router, generar_karaoke_desde_main
+
+from app.job import Job
 
 Base.metadata.create_all(bind=engine)
 
@@ -153,64 +156,88 @@ async def procesar_video(
         c for c in base_name if c.isalnum() or c in (" ", "-", "_")
     ).strip()
 
-    os.makedirs("media/videos", exist_ok=True)
-    os.makedirs("media/audios", exist_ok=True)
-
     # Generar UUID único para toda la sesión
-    session_uuid = str(uuid.uuid4())
-
-    input_temp = f"{session_uuid}.mp4"
-    output_dir = f"output_{session_uuid}"
-    audio_file = f"media/audios/{session_uuid}.wav"
-    video_sin_audio_file = f"media/videos/{session_uuid}_sin_audio.mp4"
-    final_filename = f"{session_uuid}_sin_voces.mp4"
+    job = Job()
+    job.crear_directorios()
 
     try:
-        with open(input_temp, "wb") as f:
+        with open(job.video_original_file, "wb") as f:
             f.write(await file.read())
 
+        # Obtener audio (original)
         subprocess.run(
-            ["ffmpeg", "-i", input_temp, "-q:a", "0", "-map", "a", audio_file, "-y"],
+            ["ffmpeg", "-i", job.video_original_file, "-q:a", "0", "-map", "a", job.audio_original_file, "-y"],
             check=True,
         )
 
+        # Obtener video (sin audio)
         subprocess.run(
             [
                 "ffmpeg",
                 "-i",
-                input_temp,
+                job.video_original_file,
                 "-c",
                 "copy",
                 "-an",
-                video_sin_audio_file,
+                job.video_sin_audio_file,
                 "-y",
             ],
             check=True,
         )
 
-        db.add(
-            Media(
-                name=os.path.basename(audio_file),
-                path=audio_file,
-                format="wav",
-                type="audio",
-                album_id=album_id,
-                job_id=session_uuid,
+        # Obtener duración del video usando ffprobe
+        duration_in_seconds = 0
+        try:
+            probe = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    job.video_original_file,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
             )
-        )
+            duration_in_seconds = int(float(probe.stdout.strip()))
+        except Exception as e:
+            print(f"Error obteniendo duración: {e}")
 
-        db.add(
-            Media(
-                name=os.path.basename(video_sin_audio_file),
-                path=video_sin_audio_file,
-                format="mp4",
-                type="video",
-                album_id=album_id,
-                job_id=session_uuid,
-            )
+        # Crear entidad Video
+        video_entity = Video(
+            name=base_name,
+            job_id=job.id,
+            duration_in_seconds=duration_in_seconds,
+            format="mp4",
+            album_id=album_id,
         )
-
+        db.add(video_entity)
         db.commit()
+        db.refresh(video_entity)
+
+        # Generar Thumbnail
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-ss",
+                    "00:00:05",
+                    "-i",
+                    job.video_original_file,
+                    "-vframes",
+                    "1",
+                    job.imagen_thumbnail_file,
+                    "-y",
+                ],
+                check=True,
+            )
+
+        except Exception as e:
+            print(f"Error generando thumbnail: {e}")
 
         # Usar ruta completa del ejecutable spleeter en el entorno virtual
         project_root = os.path.dirname(os.path.dirname(__file__))  # Raíz del proyecto
@@ -225,75 +252,40 @@ async def procesar_video(
                 "-p",
                 "spleeter:2stems",
                 "-o",
-                output_dir,
-                audio_file,
+                job.audios_dir,
+                job.audio_original_file,
             ],
             check=True,
         )
         print("Etapa: Separación de stems completada (Spleeter).")
 
-        audio_basename = os.path.splitext(os.path.basename(audio_file))[0]
-        instrumental_path = os.path.join(
-            output_dir, audio_basename, "accompaniment.wav"
-        )
-        vocals_path = os.path.join(output_dir, audio_basename, "vocals.wav")
-
-        if not os.path.exists(instrumental_path):
+        if not os.path.exists(job.audio_instrumental_file):
             return JSONResponse(
-                {"error": "Archivo instrumental no encontrado"}, status_code=500
+                {"error": "Archivo de audio instrumental no encontrado"}, status_code=500
             )
-
-        # Crear carpetas permanentes para archivos de audio separados
-        audio_permanent_dir = os.path.join("media", "audios", session_uuid)
-        os.makedirs(audio_permanent_dir, exist_ok=True)
-
-        # Copiar archivos de audio separados a ubicación permanente
-        permanent_instrumental = os.path.join(audio_permanent_dir, "accompaniment.wav")
-        permanent_vocals = os.path.join(audio_permanent_dir, "vocals.wav")
-
-        shutil.copy2(instrumental_path, permanent_instrumental)
-        shutil.copy2(vocals_path, permanent_vocals)
 
         subprocess.run(
             [
                 "ffmpeg",
                 "-i",
-                video_sin_audio_file,
+                job.video_sin_audio_file,
                 "-i",
-                instrumental_path,
+                job.audio_instrumental_file,
                 "-c:v",
                 "copy",
                 "-map",
                 "0:v:0",
                 "-map",
                 "1:a:0",
-                final_filename,
+                job.video_instrumental_file,
                 "-y",
             ],
             check=True,
         )
 
         # --- Generación de subtítulos (SRT y ASS) desde vocals.wav ---
-        video_karaoke_path = None  # Inicializar aquí para scope global
 
         try:
-            # Crear carpetas de salida para subtítulos
-            os.makedirs(
-                os.path.join("media", "subtitulos", "subtitulos_srt"), exist_ok=True
-            )
-            os.makedirs(
-                os.path.join("media", "subtitulos", "subtitulos_ass"), exist_ok=True
-            )
-
-            # Usar UUID de sesión como base_id para coherencia
-            base_id = session_uuid
-            srt_path = os.path.join(
-                "media", "subtitulos", "subtitulos_srt", f"{base_id}.srt"
-            )
-            ass_path = os.path.join(
-                "media", "subtitulos", "subtitulos_ass", f"{base_id}.ass"
-            )
-
             # Ejecutar WhisperX en entorno separado (venv_torch) con autodetección de idioma y device
             # Calcular ruta relativa al venv_torch desde la ubicación actual
             project_root = os.path.dirname(
@@ -303,7 +295,7 @@ async def procesar_video(
                 "WHISPERX_PY",
                 os.path.join(project_root, "venv_torch", "Scripts", "python.exe"),
             )
-            audio_in = vocals_path if os.path.exists(vocals_path) else audio_file
+            audio_in = job.audio_vocals_file if os.path.exists(job.audio_vocals_file) else job.audio_original_file
 
             # Asegurar rutas absolutas y cwd=raíz del proyecto para resolver import de `app.*`
             project_root = os.path.abspath(
@@ -315,7 +307,7 @@ async def procesar_video(
                 print(f"Iniciando WhisperX: {venv_torch_python}")
                 print(f"Script: {script_path}")
                 print(f"Audio: {audio_in}")
-                print(f"SRT output: {srt_path}")
+                print(f"SRT output: {job.subtitulos_srt_file}")
                 print(f"Idioma: {language}")
 
                 resultado_whisperx = subprocess.run(
@@ -325,7 +317,7 @@ async def procesar_video(
                         "--audio",
                         audio_in,
                         "--srt",
-                        srt_path,
+                        job.subtitulos_srt_file,
                         "--language",
                         language,
                     ],
@@ -349,9 +341,9 @@ async def procesar_video(
                 print("Etapa: Transcripción completada (WhisperX) y SRT generado.")
 
                 # Verificar que el SRT fue creado
-                if not os.path.exists(srt_path):
+                if not os.path.exists(job.subtitulos_srt_file):
                     raise FileNotFoundError(
-                        f"WhisperX no generó el archivo SRT: {srt_path}"
+                        f"WhisperX no generó el archivo SRT: {job.subtitulos_srt_file}"
                     )
 
             except subprocess.CalledProcessError as e:
@@ -365,58 +357,24 @@ async def procesar_video(
                 raise
 
             # Intentar convertir SRT -> ASS (karaoke) si el SRT existe
-            if os.path.exists(srt_path):
+            if os.path.exists(job.subtitulos_srt_file):
                 try:
                     print("Etapa: Convirtiendo SRT a ASS (karaoke)...")
-                    convertir_srt_a_ass(srt_path, ass_path)
-                    db.add(
-                        Media(
-                            name=os.path.basename(srt_path),
-                            path=srt_path,
-                            format="srt",
-                            type="subtitle",
-                            album_id=album_id,
-                            job_id=base_id,
-                        )
-                    )
-                    print(f"Conversión SRT->ASS completada: {ass_path}")
+                    convertir_srt_a_ass(job.subtitulos_srt_file, job.subtitulos_ass_file)
+                    print(f"Conversión SRT->ASS completada: {job.subtitulos_ass_file}")
                 except Exception as e:
                     print(f"ERROR en conversión SRT->ASS: {e}")
                     raise
 
             # Verificar si el ASS fue creado exitosamente (lo importante para karaoke)
-            if os.path.exists(ass_path):
-                db.add(
-                    Media(
-                        name=os.path.basename(ass_path),
-                        path=ass_path,
-                        format="ass",
-                        type="subtitle",
-                        album_id=album_id,
-                        job_id=base_id,
-                    )
-                )
-                db.commit()
-
+            if os.path.exists(job.subtitulos_ass_file):
                 # --- Generación automática de video karaoke ---
                 try:
                     print("Etapa: Generando video karaoke (incrustando subtitles)...")
-                    resultado_karaoke = generar_karaoke_desde_main(base_id)
+                    resultado_karaoke = generar_karaoke_desde_main(job)
                     if resultado_karaoke["success"]:
                         # Agregar el video karaoke a la base de datos
-                        video_karaoke_path = resultado_karaoke["video_karaoke_path"]
-                        db.add(
-                            Media(
-                                name=os.path.basename(video_karaoke_path),
-                                path=video_karaoke_path,
-                                format="mp4",
-                                type="video_karaoke",
-                                album_id=album_id,
-                                job_id=session_uuid,
-                            )
-                        )
-                        db.commit()
-                        print(f"Video karaoke generado: {video_karaoke_path}")
+                        print(f"Video karaoke generado: {job.video_karaoke_file}")
                     else:
                         print(
                             f"Error generando karaoke: {resultado_karaoke.get('error', 'Error desconocido')}"
@@ -429,7 +387,7 @@ async def procesar_video(
                     traceback.print_exc()
                 # --- Fin generación karaoke ---
             else:
-                print(f"WARNING: Archivo ASS no fue generado: {ass_path}")
+                print(f"WARNING: Archivo ASS no fue generado: {job.subtitulos_ass_file}")
 
         except Exception as e:
             # Log detallado del error pero no interrumpir la respuesta principal
@@ -440,25 +398,25 @@ async def procesar_video(
         # --- Fin subtítulos ---
 
         # Si se generó el karaoke exitosamente, descargar karaoke; sino, instrumental
-        if video_karaoke_path and os.path.exists(video_karaoke_path):
+        if os.path.exists(job.video_karaoke_file):
             # Descargar video karaoke (final deseado) con nombre original
             return FileResponse(
-                path=video_karaoke_path,
+                path=job.video_karaoke_file,
                 media_type="video/mp4",
                 filename=f"{base_name}_karaoke.mp4",
                 headers={
-                    "X-Job-ID": session_uuid,
+                    "X-Job-ID": job.id,
                     "X-Video-Type": "karaoke",
                     "X-Archivos-Generados": json.dumps(
                         {
-                            "video_instrumental": final_filename,
+                            "video_instrumental": job.video_instrumental_file,
                             "subtitulos_srt": (
-                                srt_path if os.path.exists(srt_path) else None
+                                job.subtitulos_srt_file if os.path.exists(job.subtitulos_srt_file) else None
                             ),
                             "subtitulos_ass": (
-                                ass_path if os.path.exists(ass_path) else None
+                                job.subtitulos_ass_file if os.path.exists(job.subtitulos_ass_file) else None
                             ),
-                            "video_karaoke": video_karaoke_path,
+                            "video_karaoke": job.video_karaoke_file,
                         }
                     ),
                 },
@@ -466,11 +424,11 @@ async def procesar_video(
         else:
             # Fallback: descargar video instrumental si no hay karaoke
             return FileResponse(
-                path=final_filename,
+                path=job.video_instrumental_file,
                 media_type="video/mp4",
                 filename=f"{base_name}_instrumental.mp4",
                 headers={
-                    "X-Job-ID": session_uuid,
+                    "X-Job-ID": job.id,
                     "X-Video-Type": "instrumental",
                     "X-Karaoke-Error": "Video karaoke no generado",
                 },
@@ -482,15 +440,19 @@ async def procesar_video(
             {"error": f"Error procesando el video: {str(e)}"}, status_code=500
         )
 
-    finally:
-        if os.path.exists(input_temp):
-            os.remove(input_temp)
-        if os.path.exists(output_dir):
-            shutil.rmtree(output_dir)
+
+def eliminar_archivo(path: str):
+    """Delete the file if it exists."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            print(f"Deleted temp file: {path}")
+    except Exception as e:
+        print(f"Error deleting file {path}: {e}")
 
 
 @app.get("/descargar/todo/{job_id}")
-async def descargar_todo(job_id: str):
+async def descargar_todo(job_id: str, background_tasks: BackgroundTasks):
     """
     Endpoint para descargar todos los archivos generados en un ZIP.
 
@@ -500,29 +462,29 @@ async def descargar_todo(job_id: str):
     - Audio vocals
     - Audio instrumental
     """
+    temp_zip_path = ""
+
     try:
         # Verificar que existen los archivos necesarios
         files_to_zip = []
 
+        job = Job(job_id)
+
         # Video karaoke
-        video_karaoke_path = f"media/videos/{job_id}_karaoke.mp4"
-        if os.path.exists(video_karaoke_path):
-            files_to_zip.append((video_karaoke_path, f"{job_id}_karaoke.mp4"))
+        if os.path.exists(job.video_karaoke_file):
+            files_to_zip.append((job.video_karaoke_file, f"{job_id}_karaoke.mp4"))
 
         # Audio original
-        audio_original_path = f"media/audios/{job_id}.wav"
-        if os.path.exists(audio_original_path):
-            files_to_zip.append((audio_original_path, f"{job_id}_original.wav"))
+        if os.path.exists(job.audio_original_file):
+            files_to_zip.append((job.audio_original_file, f"{job_id}_original.wav"))
 
         # Audio vocals
-        audio_vocals_path = f"media/audios/{job_id}/vocals.wav"
-        if os.path.exists(audio_vocals_path):
-            files_to_zip.append((audio_vocals_path, f"{job_id}_vocals.wav"))
+        if os.path.exists(job.audio_vocals_file):
+            files_to_zip.append((job.audio_vocals_file, f"{job_id}_vocals.wav"))
 
         # Audio instrumental
-        audio_instrumental_path = f"media/audios/{job_id}/accompaniment.wav"
-        if os.path.exists(audio_instrumental_path):
-            files_to_zip.append((audio_instrumental_path, f"{job_id}_instrumental.wav"))
+        if os.path.exists(job.audio_instrumental_file):
+            files_to_zip.append((job.audio_instrumental_file, f"{job_id}_instrumental.wav"))
 
         if not files_to_zip:
             return JSONResponse(
@@ -538,6 +500,9 @@ async def descargar_todo(job_id: str):
                     if os.path.exists(file_path):
                         zipf.write(file_path, filename)
 
+            # Asegurarse de que el ZIP es eliminado después de retornarlo
+            background_tasks.add_task(eliminar_archivo, temp_zip_path)
+
             # Retornar el ZIP
             return FileResponse(
                 path=temp_zip_path,
@@ -549,6 +514,7 @@ async def descargar_todo(job_id: str):
             )
 
     except Exception as e:
+        eliminar_archivo(temp_zip_path)
         return JSONResponse({"error": f"Error creando ZIP: {str(e)}"}, status_code=500)
 
 
@@ -567,47 +533,53 @@ async def descargar_archivo(tipo: str, job_id: str):
     - audio_vocals: Solo las voces extraídas
     - audio_instrumental: Solo la música de fondo
     """
+    job = Job(job_id)
     try:
         if tipo == "video_instrumental":
-            file_path = f"{job_id}_sin_voces.mp4"
+            file_path = job.video_instrumental_file
             media_type = "video/mp4"
             filename = f"{job_id}_instrumental.mp4"
             disposition = "attachment"
         elif tipo == "video_karaoke":
-            file_path = f"media/videos/{job_id}_karaoke.mp4"
+            file_path = job.video_karaoke_file
             media_type = "video/mp4"
             filename = f"{job_id}_karaoke.mp4"
             disposition = "attachment"
         elif tipo == "video_karaoke_preview":
-            file_path = f"media/videos/{job_id}_karaoke.mp4"
+            file_path = job.video_karaoke_preview_file
             media_type = "video/mp4"
             filename = f"{job_id}_karaoke_preview.mp4"
             disposition = "inline"
         elif tipo == "subtitulos_srt":
-            file_path = f"media/subtitulos/subtitulos_srt/{job_id}.srt"
+            file_path = job.subtitulos_srt_file
             media_type = "text/plain"
             filename = f"{job_id}_subtitulos.srt"
             disposition = "attachment"
         elif tipo == "subtitulos_ass":
-            file_path = f"media/subtitulos/subtitulos_ass/{job_id}.ass"
+            file_path = job.subtitulos_ass_file
             media_type = "text/plain"
             filename = f"{job_id}_karaoke.ass"
             disposition = "attachment"
         elif tipo == "audio_original":
-            file_path = f"media/audios/{job_id}.wav"
+            file_path = job.audio_original_file
             media_type = "audio/wav"
             filename = f"{job_id}_original.wav"
             disposition = "attachment"
         elif tipo == "audio_vocals":
-            file_path = f"media/audios/{job_id}/vocals.wav"
+            file_path = job.audio_vocals_file
             media_type = "audio/wav"
             filename = f"{job_id}_vocals.wav"
             disposition = "attachment"
         elif tipo == "audio_instrumental":
-            file_path = f"media/audios/{job_id}/accompaniment.wav"
+            file_path = job.audio_instrumental_file
             media_type = "audio/wav"
             filename = f"{job_id}_instrumental.wav"
             disposition = "attachment"
+        elif tipo == "thumbnail":
+            file_path = job.imagen_thumbnail_file
+            media_type = "image/jpeg"
+            filename = f"{job_id}_thumbnail.jpg"
+            disposition = "inline"
         else:
             return JSONResponse({"error": "Tipo de archivo no válido"}, status_code=400)
 
@@ -631,6 +603,150 @@ async def descargar_archivo(tipo: str, job_id: str):
         return JSONResponse(
             {"error": f"Error descargando archivo: {str(e)}"}, status_code=500
         )
+
+
+@app.get("/albums/{id}/videos")
+def get_album_videos(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    album = db.query(Album).filter(Album.id == id).first()
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Álbum no encontrado"
+        )
+    if album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+    
+    return album.videos
+
+
+@app.get("/videos/{job_id}", response_model=VideoResponse)
+def get_video(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.job_id == job_id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+    # Verificar que el álbum del video pertenezca al usuario del video (acceso indirecto)
+    # OJO: La tabla Video no tiene user_id directo, se accede via álbum.
+    album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not album or album.user_id != current_user.id:
+        raise HTTPException(
+             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+    return video
+
+
+@app.put("/videos/{job_id}/album", response_model=VideoResponse)
+def move_video_album(
+    job_id: str,
+    target_album_id: int = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.job_id == job_id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+
+    # Verificar propiedad del video actual
+    current_album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not current_album or current_album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para este video"
+        )
+
+    # Verificar existencia y propiedad del álbum destino
+    target_album = db.query(Album).filter(Album.id == target_album_id).first()
+    if not target_album:
+        raise HTTPException(
+             status_code=status.HTTP_404_NOT_FOUND, detail="Álbum destino no encontrado"
+        )
+    if target_album.user_id != current_user.id:
+        raise HTTPException(
+             status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado para el álbum destino"
+        )
+
+    video.album_id = target_album_id
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@app.put("/videos/{job_id}", response_model=VideoResponse)
+def update_video(
+    job_id: str,
+    payload: VideoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.job_id == job_id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+    
+    # Verificar propiedad (via álbum)
+    album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not album or album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+
+    if payload.name is not None:
+        video.name = payload.name
+
+    db.commit()
+    db.refresh(video)
+    return video
+
+
+@app.delete("/videos/{job_id}", status_code=204)
+def delete_video(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    video = db.query(Video).filter(Video.job_id == job_id).first()
+    if not video:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video no encontrado"
+        )
+
+    # Verificar propiedad (via álbum)
+    album = db.query(Album).filter(Album.id == video.album_id).first()
+    if not album or album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+
+    # 1. Eliminar directorio físico (media/{job_id})
+    if video.job_id:
+        try:
+            job_instance = Job(video.job_id)
+            if os.path.exists(job_instance.job_dir):
+                shutil.rmtree(job_instance.job_dir)
+                print(f"Directorio eliminado: {job_instance.job_dir}")
+            else:
+                print(f"Directorio no encontrado: {job_instance.job_dir}")
+        except Exception as e:
+            print(f"Error eliminando directorio físico: {e}")
+            # No bloqueamos la eliminación de la DB, pero logueamos error
+
+    # 2. Eliminar de la base de datos
+    db.delete(video)
+    db.commit()
+    return
+
 
 
 @app.get("/albums", response_model=List[AlbumResponse])
@@ -665,6 +781,22 @@ def create_album(
     db.refresh(album)
     return album
 
+@app.get("/albums/{id}", response_model=AlbumResponse)
+def read_album(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    album = db.query(Album).filter(Album.id == id).first()
+    if not album:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Álbum no encontrado"
+        )
+    if album.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado"
+        )
+    return album
 
 @app.put("/albums/{id}", response_model=AlbumResponse)
 def update_album(

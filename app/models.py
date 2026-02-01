@@ -5,19 +5,18 @@ from .database import Base
 
 
 
-class Media(Base):
-    __tablename__ = "media"
+class Video(Base):
+    __tablename__ = "videos"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    path = Column(String, nullable=False)
-    format = Column(String, nullable=False)
-    type = Column(String, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    job_id = Column(String, nullable=True)
-    album_id = Column(Integer, ForeignKey("albums.id"), nullable=True)
+    job_id = Column(String, nullable=False)
+    duration_in_seconds = Column(Integer, nullable=False)
+    format = Column(String, nullable=False)
+    album_id = Column(Integer, ForeignKey("albums.id"), nullable=False)
 
-    album = relationship("Album", back_populates="media")
+    album = relationship("Album", back_populates="videos")
 
 
 class User(Base):
@@ -36,10 +35,10 @@ class Album(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    description = Column(String, nullable=True)
+    description = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", back_populates="albums")
-    media = relationship("Media", back_populates="album", cascade="all, delete")
+    videos = relationship("Video", back_populates="album", cascade="all, delete")
 
