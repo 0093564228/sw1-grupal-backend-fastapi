@@ -4,20 +4,26 @@ Usa archivos ya procesados del proyecto principal
 Integrado como servicio en el backend principal
 """
 
-import os
 import json
+import os
 import subprocess
 import threading
-from pathlib import Path
-from typing import Optional, Dict, Any
 from datetime import datetime
-from dotenv import load_dotenv
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.job import MEDIA_DIR, SUBTITULOS_ASS, VIDEO_INSTRUMENTAL, VIDEO_KARAOKE, Job
+from app.job import (
+    MEDIA_DIR,
+    SUBTITULOS_ASS,
+    VIDEO_INSTRUMENTAL,
+    VIDEO_KARAOKE,
+    Job,
+)
 
 # Cargar variables de entorno
 load_dotenv()
@@ -67,7 +73,11 @@ def generar_karaoke_desde_main(job: Job) -> Dict[str, Any]:
         )
         return {"success": False, "error": error_msg, "job_id": job.id}
     except Exception as e:
-        return {"success": False, "error": f"Error interno: {str(e)}", "job_id": job.id}
+        return {
+            "success": False,
+            "error": f"Error interno: {str(e)}",
+            "job_id": job.id,
+        }
 
 
 # Modelos Pydantic para respuestas
@@ -144,12 +154,14 @@ def validar_archivos_entrada_karaoke(job: Job) -> Dict[str, Any]:
         )
 
     # Verificar tamaño del video
-    tamaño_mb = os.path.getsize(job.video_instrumental_file) / (1024 * 1024)
+    size_in_mb = os.path.getsize(job.video_instrumental_file) / (
+        1024 * 1024
+    )
 
     return {
         "video_instrumental": job.video_instrumental_file,
         "subtitulos_ass": job.subtitulos_ass_file,
-        "tamaño_mb": tamaño_mb,
+        "tamaño_mb": size_in_mb,
     }
 
 
@@ -176,9 +188,15 @@ def componer_video_karaoke(job: Job) -> Path:
     try:
         print("Incrustando subtítulos ASS con ffmpeg...")
         with open(job.log_file, "w", encoding="utf-8") as log_file:
-            log_file.write(f"=== Composición final karaoke - {datetime.now()} ===\n")
-            log_file.write(f"Video instrumental (usado): {job.video_instrumental_file}\n")
-            log_file.write(f"Subtítulos ASS: {job.subtitulos_ass_file}\n")
+            log_file.write(
+                f"=== Composición final karaoke - {datetime.now()} ===\n"
+            )
+            log_file.write(
+                f"Video instrumental (usado): {job.video_instrumental_file}\n"
+            )
+            log_file.write(
+                f"Subtítulos ASS: {job.subtitulos_ass_file}\n"
+            )
             log_file.write(f"Output: {job.video_karaoke_file}\n")
             log_file.write(f"Comando: {' '.join(cmd)}\n\n")
 
@@ -189,7 +207,7 @@ def componer_video_karaoke(job: Job) -> Path:
                 85,
                 "Incrustando subtítulos y codificando video karaoke",
             )
-            proceso = subprocess.run(
+            subprocess.run(
                 cmd,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -199,7 +217,9 @@ def componer_video_karaoke(job: Job) -> Path:
             )
 
         if not os.path.exists(job.video_karaoke_file):
-            raise subprocess.CalledProcessError(1, cmd, "Video karaoke no generado")
+            raise subprocess.CalledProcessError(
+                1, cmd, "Video karaoke no generado"
+            )
 
         # Actualizar estado final
         actualizar_estado_karaoke(
@@ -207,14 +227,15 @@ def componer_video_karaoke(job: Job) -> Path:
         )
         return job.video_karaoke_file
 
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as ex:
         raise HTTPException(
             status_code=500,
             detail={
                 "codigo": "500_FFMPEG_TIMEOUT",
-                "mensaje": f"Timeout en composición: proceso excedió {FFMPEG_TIMEOUT_COMPOSICION} segundos",
+                "mensaje": "Timeout en composición: "
+                + "proceso excedió {FFMPEG_TIMEOUT_COMPOSICION} segundos",
             },
-        )
+        ) from ex
     except subprocess.CalledProcessError as e:
         # Leer el log para obtener más información del error
         error_details = f"FFmpeg falló con código {e.returncode}"
@@ -223,7 +244,7 @@ def componer_video_karaoke(job: Job) -> Path:
                 with open(job.log_file, "r", encoding="utf-8") as f:
                     log_content = f.read()
                     error_details += f". Log: {log_content[-500:]}"
-            except:
+            except Exception:
                 pass
 
         raise HTTPException(
@@ -232,7 +253,7 @@ def componer_video_karaoke(job: Job) -> Path:
                 "codigo": "500_FFMPEG_ERROR",
                 "mensaje": f"Error en composición de video karaoke: {error_details}",
             },
-        )
+        ) from e
 
 
 def actualizar_estado_karaoke(
@@ -255,7 +276,7 @@ def actualizar_estado_karaoke(
                 estado_previo = json.load(f)
                 if estado_previo.get("error"):
                     info_estado["error"] = estado_previo["error"]
-        except:
+        except Exception:
             pass
 
     with open(archivo_estado, "w", encoding="utf-8") as f:
@@ -278,17 +299,20 @@ def ejecutar_pipeline_karaoke(job_id: str):
         job.crear_directorios()
 
         actualizar_estado_karaoke(
-            job, "validando_archivos", 20, "Validando archivos del proyecto principal"
+            job,
+            "validando_archivos",
+            20,
+            "Validando archivos del proyecto principal",
         )
 
-        info_archivos = validar_archivos_entrada_karaoke(job)
+        validar_archivos_entrada_karaoke(job)
 
         # 2. Componer video karaoke directamente
         actualizar_estado_karaoke(
             job, "generando_video", 50, "Componiendo video karaoke"
         )
 
-        video_karaoke = componer_video_karaoke(job)
+        componer_video_karaoke(job)
 
         # 3. Finalizar
         actualizar_estado_karaoke(
@@ -334,7 +358,9 @@ def leer_estado_job_karaoke(job: Job) -> Dict[str, Any]:
     # Primero intentar leer desde archivo
     if os.path.exists(job.estado_actual_file):
         try:
-            with open(job.estado_actual_file, "r", encoding="utf-8") as f:
+            with open(
+                job.estado_actual_file, "r", encoding="utf-8"
+            ) as f:
                 return json.load(f)
         except Exception:
             pass
@@ -353,7 +379,9 @@ def leer_estado_job_karaoke(job: Job) -> Dict[str, Any]:
 
 
 # Endpoints principales del servicio Karaoke
-@karaoke_router.post("/ejecutar/{job_id}", response_model=RespuestaEjecutar)
+@karaoke_router.post(
+    "/ejecutar/{job_id}", response_model=RespuestaEjecutar
+)
 async def ejecutar_karaoke(job_id: str):
     """
     Endpoint karaoke: usa archivos ya generados por el proyecto principal
@@ -384,20 +412,28 @@ async def ejecutar_karaoke(job_id: str):
             "generando_video",
         ]:
             return RespuestaEjecutar(
-                job_id=job_id, status="processing", mensaje="Job ya en procesamiento"
+                job_id=job_id,
+                status="processing",
+                mensaje="Job ya en procesamiento",
             )
 
         # 4. Iniciar procesamiento asíncrono
-        actualizar_estado_karaoke(job, "queued", 0, "Job encolado para procesamiento")
+        actualizar_estado_karaoke(
+            job, "queued", 0, "Job encolado para procesamiento"
+        )
 
         # Ejecutar en hilo separado para no bloquear FastAPI
         hilo_procesamiento = threading.Thread(
-            target=ejecutar_pipeline_karaoke, args=(job_id,), daemon=True
+            target=ejecutar_pipeline_karaoke,
+            args=(job_id,),
+            daemon=True,
         )
         hilo_procesamiento.start()
 
         return RespuestaEjecutar(
-            job_id=job_id, status="queued", mensaje="Procesamiento iniciado"
+            job_id=job_id,
+            status="queued",
+            mensaje="Procesamiento iniciado",
         )
 
     except HTTPException:
@@ -409,7 +445,7 @@ async def ejecutar_karaoke(job_id: str):
                 "codigo": "500_ERROR_INTERNO",
                 "mensaje": f"Error interno: {str(e)}",
             },
-        )
+        ) from e
 
 
 @karaoke_router.get("/estado/{job_id}", response_model=RespuestaEstado)
@@ -431,7 +467,8 @@ async def consultar_estado_karaoke(job_id: str):
 
     except Exception as e:
         return RespuestaEstado(
-            status="error", mensaje=f"Error consultando estado: {str(e)}"
+            status="error",
+            mensaje=f"Error consultando estado: {str(e)}",
         )
 
 
@@ -463,14 +500,14 @@ async def descargar_video_karaoke(job_id: str):
                         "mensaje": "El video existe pero está vacío",
                     },
                 )
-        except OSError:
+        except OSError as e:
             raise HTTPException(
                 status_code=500,
                 detail={
                     "codigo": "500_VIDEO_INACCESIBLE",
                     "mensaje": "No se puede acceder al archivo de video",
                 },
-            )
+            ) from e
 
         return FileResponse(
             path=job.video_karaoke_file,
@@ -490,7 +527,7 @@ async def descargar_video_karaoke(job_id: str):
                 "codigo": "500_ERROR_DESCARGA",
                 "mensaje": f"Error en descarga: {str(e)}",
             },
-        )
+        ) from e
 
 
 @karaoke_router.get("/preview/{job_id}")
@@ -522,14 +559,14 @@ async def preview_video_karaoke(job_id: str):
                         "mensaje": "El video existe pero está vacío",
                     },
                 )
-        except OSError:
+        except OSError as e:
             raise HTTPException(
                 status_code=500,
                 detail={
                     "codigo": "500_VIDEO_INACCESIBLE",
                     "mensaje": "No se puede acceder al archivo de video",
                 },
-            )
+            ) from e
 
         # Retornar video para visualización en navegador (sin forzar descarga)
         return FileResponse(
@@ -552,7 +589,7 @@ async def preview_video_karaoke(job_id: str):
                 "codigo": "500_ERROR_PREVIEW",
                 "mensaje": f"Error en preview: {str(e)}",
             },
-        )
+        ) from e
 
 
 @karaoke_router.get("/info")
@@ -576,8 +613,11 @@ async def info_karaoke():
             "video_instrumental": VIDEO_INSTRUMENTAL,
             "subtitulos_ass": SUBTITULOS_ASS,
         },
-        "salida": {"video_karaoke":  VIDEO_KARAOKE},
-        "configuracion": {"preset_x264": KARAOKE_PRESET_X264, "crf": KARAOKE_CRF},
+        "salida": {"video_karaoke": VIDEO_KARAOKE},
+        "configuracion": {
+            "preset_x264": KARAOKE_PRESET_X264,
+            "crf": KARAOKE_CRF,
+        },
     }
 
 
@@ -590,10 +630,13 @@ async def health_check_karaoke():
         ffmpeg_ok = False
         try:
             subprocess.run(
-                ["ffmpeg", "-version"], capture_output=True, check=True, timeout=5
+                ["ffmpeg", "-version"],
+                capture_output=True,
+                check=True,
+                timeout=5,
             )
             ffmpeg_ok = True
-        except:
+        except Exception:
             pass
 
         # Verificar estructura de directorios del proyecto principal
@@ -607,13 +650,17 @@ async def health_check_karaoke():
         write_ok = False
         try:
             test_file = Path(MEDIA_DIR + "/test_write.tmp")
-            test_file.write_text("test")
+            test_file.write_text("test", encoding="utf-8")
             test_file.unlink()
             write_ok = True
-        except:
+        except Exception:
             pass
 
-        status = "healthy" if (ffmpeg_ok and dirs_ok and write_ok) else "unhealthy"
+        status = (
+            "healthy"
+            if (ffmpeg_ok and dirs_ok and write_ok)
+            else "unhealthy"
+        )
 
         return {
             "status": status,

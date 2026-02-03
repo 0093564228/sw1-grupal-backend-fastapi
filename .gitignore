@@ -18,7 +18,6 @@ __pycache__/
 .env.*
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo

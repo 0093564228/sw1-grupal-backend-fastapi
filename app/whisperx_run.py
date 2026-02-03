@@ -1,36 +1,47 @@
+"""
+Módulo de transcripción de audio a SRT.
+Gestiona la transcripción de audio a SRT palabra a palabra con WhisperX (optimizado para Spanish).
+"""
+
 import argparse
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import torch.serialization
-from torch.torch_version import TorchVersion
 from omegaconf.base import Metadata
-from omegaconf.listconfig import ListConfig, ContainerMetadata
+from omegaconf.listconfig import ContainerMetadata, ListConfig
 from omegaconf.nodes import AnyNode
-from typing import Any
-from collections import defaultdict
 from pyannote.audio.core.model import Introspection
-from pyannote.audio.core.task import Specifications, Problem, Resolution
+from pyannote.audio.core.task import Problem, Resolution, Specifications
+from torch.torch_version import TorchVersion
 
-torch.serialization.add_safe_globals([
-    ListConfig,
-    ContainerMetadata,
-    Any,
-    list,
-    defaultdict,
-    dict,
-    int,
-    AnyNode,
-    Metadata,
-    TorchVersion,
-    Introspection,
-    Specifications,
-    Problem,
-    Resolution,
-])
+torch.serialization.add_safe_globals(
+    [
+        ListConfig,
+        ContainerMetadata,
+        Any,
+        list,
+        defaultdict,
+        dict,
+        int,
+        AnyNode,
+        Metadata,
+        TorchVersion,
+        Introspection,
+        Specifications,
+        Problem,
+        Resolution,
+    ]
+)
+
 
 def env(name: str, default: str | None = None) -> str | None:
+    """
+    Obtiene una variable de entorno.
+    """
     value = os.getenv(name)
     if value is None or value == "":
         return default
@@ -38,6 +49,9 @@ def env(name: str, default: str | None = None) -> str | None:
 
 
 def as_int(name: str, default: int) -> int:
+    """
+    Obtiene un entero de una variable de entorno.
+    """
     try:
         value = env(name)
         return int(value) if value is not None else default
@@ -46,6 +60,9 @@ def as_int(name: str, default: int) -> int:
 
 
 def main() -> None:
+    """
+    Función principal que ejecuta la transcripción de audio a SRT.
+    """
     parser = argparse.ArgumentParser(
         description="Transcribe audio en ESPAÑOL a SRT palabra a palabra con WhisperX (optimizado para Spanish)."
     )
@@ -93,10 +110,14 @@ def main() -> None:
 
     # Validaciones iniciales
     if not os.path.exists(audio_path):
-        print(f"ERROR: No existe el audio: {audio_path}", file=sys.stderr)
+        print(
+            f"ERROR: No existe el audio: {audio_path}", file=sys.stderr
+        )
         sys.exit(2)
 
-    if not audio_path.lower().endswith((".wav", ".mp3", ".m4a", ".flac", ".ogg")):
+    if not audio_path.lower().endswith(
+        (".wav", ".mp3", ".m4a", ".flac", ".ogg")
+    ):
         print(
             f"WARNING: Archivo de audio podría no ser válido: {audio_path}",
             file=sys.stderr,
@@ -108,7 +129,9 @@ def main() -> None:
         if str(project_root) not in sys.path:
             sys.path.insert(0, str(project_root))
 
-        print(f"[WhisperX] Project root: {project_root}", file=sys.stderr)
+        print(
+            f"[WhisperX] Project root: {project_root}", file=sys.stderr
+        )
         print(f"[WhisperX] Audio: {audio_path}", file=sys.stderr)
         print(f"[WhisperX] Output SRT: {srt_path}", file=sys.stderr)
 
@@ -121,7 +144,10 @@ def main() -> None:
 
         import whisperx
 
-        print(f"[WhisperX] WhisperX importado correctamente", file=sys.stderr)
+        print(
+            f"[WhisperX] WhisperX importado correctamente",
+            file=sys.stderr,
+        )
 
         from app.subtitles import segundos_a_tiempo_srt
 
@@ -131,7 +157,9 @@ def main() -> None:
             or env("WHISPERX_DEVICE")
             or ("cuda" if torch.cuda.is_available() else "cpu")
         )
-        print(f"[WhisperX] Device seleccionado: {device}", file=sys.stderr)
+        print(
+            f"[WhisperX] Device seleccionado: {device}", file=sys.stderr
+        )
 
         # 2) Modelo: CLI > ENV > default (optimizado para español: medium)
         # Para transcripción en español, 'medium' ofrece buen balance velocidad/precisión
@@ -143,7 +171,9 @@ def main() -> None:
         compute_type = env("WHISPERX_COMPUTE_TYPE")
         if not compute_type:
             compute_type = "float16" if device == "cuda" else "float32"
-        print(f"[WhisperX] Compute type: {compute_type}", file=sys.stderr)
+        print(
+            f"[WhisperX] Compute type: {compute_type}", file=sys.stderr
+        )
 
         # 4) Batch-size: CLI > ENV > default (optimizado para español)
         # Para español con modelo medium, usar batch más pequeño en CPU
@@ -174,7 +204,10 @@ def main() -> None:
             file=sys.stderr,
         )
         model = whisperx.load_model(
-            model_name, device, compute_type=compute_type, language=LANGUAGE
+            model_name,
+            device,
+            compute_type=compute_type,
+            language=LANGUAGE,
         )
         print(
             f"[WhisperX] Modelo cargado correctamente (optimizado para español)",
@@ -194,9 +227,14 @@ def main() -> None:
 
         # Obtener el idioma para alineación
         # Si LANGUAGE es None (auto), usar el idioma detectado por Whisper
-        align_language = LANGUAGE if LANGUAGE else result.get("language")
+        align_language = (
+            LANGUAGE if LANGUAGE else result.get("language")
+        )
 
-        print(f"[WhisperX] Idioma detectado/usado: {align_language}", file=sys.stderr)
+        print(
+            f"[WhisperX] Idioma detectado/usado: {align_language}",
+            file=sys.stderr,
+        )
 
         print(f"[WhisperX] Alineando timestamps...", file=sys.stderr)
         align_model, metadata = whisperx.load_align_model(
@@ -214,10 +252,16 @@ def main() -> None:
         print(f"[WhisperX] Alineamiento completado", file=sys.stderr)
 
         word_segments = aligned.get("word_segments") or []
-        print(f"[WhisperX] Palabras extraídas: {len(word_segments)}", file=sys.stderr)
+        print(
+            f"[WhisperX] Palabras extraídas: {len(word_segments)}",
+            file=sys.stderr,
+        )
 
         if not word_segments:
-            print(f"WARNING: No se extrajeron palabras del audio", file=sys.stderr)
+            print(
+                f"WARNING: No se extrajeron palabras del audio",
+                file=sys.stderr,
+            )
 
         lines = []
         for i, w in enumerate(word_segments, 1):
@@ -239,7 +283,10 @@ def main() -> None:
         )
 
     except ImportError as e:
-        print(f"ERROR: No se pudo importar módulo requerido: {e}", file=sys.stderr)
+        print(
+            f"ERROR: No se pudo importar módulo requerido: {e}",
+            file=sys.stderr,
+        )
         sys.exit(1)
     except FileNotFoundError as e:
         print(f"ERROR: Archivo no encontrado: {e}", file=sys.stderr)
