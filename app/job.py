@@ -1,3 +1,9 @@
+"""
+Módulo de tarea.
+Gestiona la creación y organización de archivos para cada tarea
+de procesamiento de videos para karaoke.
+"""
+
 import os
 import uuid
 
@@ -31,22 +37,35 @@ ARCHIVO_LOG = BITACORA_DIR + "/ffmpeg.log"
 
 
 class Job:
+    """
+    Clase que representa una tarea de procesamiento de video.
+    """
 
     def __init__(self, job_id: str = str(uuid.uuid4())):
         self.id = job_id
 
         self.audio_original_file = AUDIO_ORIGINAL.format(job_id=job_id)
-        self.audio_instrumental_file = AUDIO_INSTRUMENTAL.format(job_id=job_id)
+        self.audio_instrumental_file = AUDIO_INSTRUMENTAL.format(
+            job_id=job_id
+        )
         self.audio_vocals_file = AUDIO_VOCALS.format(job_id=job_id)
-        
-        self.video_original_file = VIDEO_ORIGINAL.format(job_id=job_id)
-        self.video_sin_audio_file = VIDEO_SIN_AUDIO.format(job_id=job_id)
-        self.video_instrumental_file = VIDEO_INSTRUMENTAL.format(job_id=job_id)
-        self.video_karaoke_file = VIDEO_KARAOKE.format(job_id=job_id)
-        self.video_karaoke_preview_file = VIDEO_KARAOKE_PREVIEW.format(job_id=job_id)
 
-        self.imagen_thumbnail_file = IMAGEN_THUMBNAIL.format(job_id=job_id)
-        
+        self.video_original_file = VIDEO_ORIGINAL.format(job_id=job_id)
+        self.video_sin_audio_file = VIDEO_SIN_AUDIO.format(
+            job_id=job_id
+        )
+        self.video_instrumental_file = VIDEO_INSTRUMENTAL.format(
+            job_id=job_id
+        )
+        self.video_karaoke_file = VIDEO_KARAOKE.format(job_id=job_id)
+        self.video_karaoke_preview_file = VIDEO_KARAOKE_PREVIEW.format(
+            job_id=job_id
+        )
+
+        self.imagen_thumbnail_file = IMAGEN_THUMBNAIL.format(
+            job_id=job_id
+        )
+
         self.subtitulos_srt_file = SUBTITULOS_SRT.format(job_id=job_id)
         self.subtitulos_ass_file = SUBTITULOS_ASS.format(job_id=job_id)
 
@@ -61,6 +80,9 @@ class Job:
         self.imagenes_dir = IMAGENES_DIR.format(job_id=job_id)
 
     def crear_directorios(self):
+        """
+        Crea los directorios necesarios para la tarea.
+        """
         os.makedirs(self.media_dir, exist_ok=True)
         os.makedirs(self.job_dir, exist_ok=True)
         os.makedirs(self.videos_dir, exist_ok=True)

@@ -1,5 +1,9 @@
-import re
+"""
+Módulo de subtitulos.
+Permite la creación de subtitulos.
+"""
 
+import re
 
 DEFAULT_VIDEO = {
     "width": 1920,
@@ -30,16 +34,20 @@ VOWELS = set("aeiouáéíóúüAEIOUÁÉÍÓÚÜ")
 
 
 def segundos_a_tiempo_srt(segundos: float) -> str:
+    """
+    Convierte segundos a tiempo en formato SRT.
+    """
     segundos = float(segundos)
     horas, resto = divmod(segundos, 3600)
     minutos, resto = divmod(resto, 60)
     segs, frac = divmod(resto, 1)
-    return "{:02}:{:02}:{:02},{:03}".format(
-        int(horas), int(minutos), int(segs), int(frac * 1000)
-    )
+    return f"{horas:02.0f}:{minutos:02.0f}:{segs:02.0f},{(frac * 1000):03.0f}"
 
 
 def parse_time_to_ms(time_str: str) -> int:
+    """
+    Convierte un tiempo en formato SRT a milisegundos.
+    """
     m = re.match(r"(\d{2}):(\d{2}):(\d{2}),(\d{3})", time_str)
     if not m:
         raise ValueError(f"Formato de tiempo inválido: {time_str}")
@@ -48,6 +56,9 @@ def parse_time_to_ms(time_str: str) -> int:
 
 
 def parse_srt_word_level(path: str):
+    """
+    Parsea un archivo SRT y devuelve una lista de palabras con sus tiempos de inicio y fin.
+    """
     with open(path, "r", encoding="utf-8") as f:
         content = f.read().strip()
     blocks = re.split(r"\n\s*\n", content)
@@ -64,11 +75,16 @@ def parse_srt_word_level(path: str):
         end_ms = parse_time_to_ms(m.group(2))
         text = " ".join(lines[2:]).strip()
         if text:
-            words.append({"text": text, "start_ms": start_ms, "end_ms": end_ms})
+            words.append(
+                {"text": text, "start_ms": start_ms, "end_ms": end_ms}
+            )
     return words
 
 
 def split_syllables(word: str):
+    """
+    Divide una palabra en sílabas.
+    """
     if not word:
         return [word]
     if all(not ch.isalpha() for ch in word):
@@ -79,7 +95,11 @@ def split_syllables(word: str):
     n = len(word)
 
     def is_consonant(idx: int):
-        return 0 <= idx < n and word[idx].isalpha() and word[idx] not in VOWELS
+        return (
+            0 <= idx < n
+            and word[idx].isalpha()
+            and word[idx] not in VOWELS
+        )
 
     def is_vowel(idx: int):
         return 0 <= idx < n and word[idx] in VOWELS
@@ -126,14 +146,27 @@ def split_syllables(word: str):
 
 
 def estimate_char_width(font_size: int) -> float:
+    """
+    Estima el ancho de un carácter en píxeles.
+    """
     return font_size * 0.6
 
 
 def available_width(cfg_video) -> float:
-    return cfg_video["width"] - cfg_video["margin_left"] - cfg_video["margin_right"]
+    """
+    Calcula el ancho disponible para el texto.
+    """
+    return (
+        cfg_video["width"]
+        - cfg_video["margin_left"]
+        - cfg_video["margin_right"]
+    )
 
 
 def should_wrap_line(current_words, next_word, cfg_video) -> bool:
+    """
+    Determina si se debe envolver una línea de texto.
+    """
     if not current_words:
         return False
     current_text = " ".join(w["text"] for w in current_words)
@@ -143,6 +176,9 @@ def should_wrap_line(current_words, next_word, cfg_video) -> bool:
 
 
 def group_words(words, cfg_video, cfg_group):
+    """
+    Agrupa las palabras en frases.
+    """
     if not words:
         return []
 
@@ -179,9 +215,9 @@ def group_words(words, cfg_video, cfg_group):
             pause_between = nxt[0]["start_ms"] - cur[-1]["end_ms"]
             comb = cur + nxt
             char_w = estimate_char_width(cfg_video["font_size"])
-            fits = len(" ".join(w["text"] for w in comb)) * char_w <= available_width(
-                cfg_video
-            )
+            fits = len(
+                " ".join(w["text"] for w in comb)
+            ) * char_w <= available_width(cfg_video)
             if pause_between < 600 and fits:
                 optimized.append(comb)
                 i += 2
@@ -193,6 +229,9 @@ def group_words(words, cfg_video, cfg_group):
 
 
 def ms_to_ass_time(ms: int) -> str:
+    """
+    Convierte milisegundos a tiempo en formato ASS.
+    """
     h = ms // 3600000
     m = (ms % 3600000) // 60000
     s = (ms % 60000) // 1000
@@ -201,6 +240,9 @@ def ms_to_ass_time(ms: int) -> str:
 
 
 def ass_header(cfg_video, style) -> str:
+    """
+    Genera el encabezado de un archivo de subtitulos en formato ASS.
+    """
     return (
         "[Script Info]\n"
         f"Title: Karaoke\n"
@@ -211,18 +253,27 @@ def ass_header(cfg_video, style) -> str:
         f"Video Aspect Ratio: {cfg_video['width']}:{cfg_video['height']}\n"
         "WrapStyle: 0\n\n"
         "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
-        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, "
+        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: {style['name']},{style['font']},{cfg_video['font_size']},{style['primary']},{style['secondary']},"
-        f"{style['outline']},{style['back']},1,0,0,0,100,100,0,0,1,{style['outline_width']},{style['shadow']},"
-        f"{style['alignment']},{cfg_video['margin_left']},{cfg_video['margin_right']},{cfg_video['margin_vertical']},1\n\n"
+        f"Style: {style['name']},{style['font']},{cfg_video['font_size']},"
+        f"{style['primary']},{style['secondary']},"
+        f"{style['outline']},{style['back']},1,0,0,0,100,100,0,0,1,"
+        f"{style['outline_width']},{style['shadow']},"
+        f"{style['alignment']},{cfg_video['margin_left']},"
+        f"{cfg_video['margin_right']},{cfg_video['margin_vertical']},1\n\n"
         "[Events]\n"
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, "
+        "MarginR, MarginV, Effect, Text\n"
     )
 
 
-def ass_line(phrase_words, cfg_video) -> str:
+def ass_line(phrase_words, _cfg_video) -> str:
+    """
+    Genera una línea de subtitulos en formato ASS.
+    """
     start_ms = phrase_words[0]["start_ms"]
     end_ms = phrase_words[-1]["end_ms"]
     start = ms_to_ass_time(start_ms)
@@ -253,9 +304,15 @@ def ass_line(phrase_words, cfg_video) -> str:
                 if has_letters(tok):
                     remaining_timed -= 1
                     if remaining_timed == 0:
-                        cs = max(1, dur_cs - allocated_cs) if dur_cs > 0 else 0
+                        cs = (
+                            max(1, dur_cs - allocated_cs)
+                            if dur_cs > 0
+                            else 0
+                        )
                     else:
-                        exact = dur_cs * (len(tok) / (timed_total_chars or 1))
+                        exact = dur_cs * (
+                            len(tok) / (timed_total_chars or 1)
+                        )
                         cs = max(1, round(exact)) if dur_cs > 0 else 0
                     allocated_cs += cs
                     karaoke_text += f"{{\\kf{cs}}}{tok}"
@@ -272,6 +329,9 @@ def ass_line(phrase_words, cfg_video) -> str:
 
 
 def write_ass(phrases, output_path: str, cfg_video, style) -> None:
+    """
+    Escribe las frases en un archivo de subtitulos en formato ASS.
+    """
     header = ass_header(cfg_video, style)
     lines = [ass_line(p, cfg_video) for p in phrases]
     with open(output_path, "w", encoding="utf-8") as f:
@@ -279,8 +339,15 @@ def write_ass(phrases, output_path: str, cfg_video, style) -> None:
 
 
 def convertir_srt_a_ass(
-    srt_path: str, ass_output: str, cfg_video=None, cfg_group=None, style=None
+    srt_path: str,
+    ass_output: str,
+    cfg_video=None,
+    cfg_group=None,
+    style=None,
 ):
+    """
+    Convierte un archivo SRT a un archivo ASS.
+    """
     cfg_video = cfg_video or DEFAULT_VIDEO
     cfg_group = cfg_group or DEFAULT_GROUP
     style = style or DEFAULT_STYLE
@@ -292,4 +359,8 @@ def convertir_srt_a_ass(
     phrases = group_words(words, cfg_video, cfg_group)
     write_ass(phrases, ass_output, cfg_video, style)
 
-    return {"phrases": len(phrases), "words": len(words), "ass": ass_output}
+    return {
+        "phrases": len(phrases),
+        "words": len(words),
+        "ass": ass_output,
+    }
